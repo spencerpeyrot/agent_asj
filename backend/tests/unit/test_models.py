@@ -6,10 +6,12 @@ from app.main import Message, Session, SpeakerType
 def test_message_model():
     # Test valid message creation
     message = Message(
+        session_id="test-session",
         speaker=SpeakerType.USER,
         timestamp=datetime.now().isoformat(),
         content="Test message"
     )
+    assert message.session_id == "test-session"
     assert message.speaker == SpeakerType.USER
     assert message.content == "Test message"
     assert message.metadata is None
@@ -17,6 +19,7 @@ def test_message_model():
     # Test invalid speaker
     with pytest.raises(ValidationError):
         Message(
+            session_id="test-session",
             speaker="invalid_speaker",
             timestamp=datetime.now().isoformat(),
             content="Test message"
@@ -38,7 +41,8 @@ def test_session_model():
 
     # Test adding message to session
     message = Message(
-        speaker="user",
+        session_id=session_id,
+        speaker=SpeakerType.USER,
         timestamp=datetime.now().isoformat(),
         content="Test message"
     )
@@ -49,6 +53,7 @@ def test_message_metadata():
     # Test message with metadata
     metadata = {"key": "value"}
     message = Message(
+        session_id="test-session",
         speaker=SpeakerType.SYSTEM,
         timestamp=datetime.now().isoformat(),
         content="Test message",
@@ -62,6 +67,7 @@ def test_message_validation():
     # Test invalid speaker
     with pytest.raises(ValidationError):
         Message(
+            session_id="test-session",
             speaker="invalid",
             timestamp=datetime.now().isoformat(),
             content="Test message"
@@ -70,6 +76,7 @@ def test_message_validation():
     # Test invalid timestamp
     with pytest.raises(ValidationError):
         Message(
+            session_id="test-session",
             speaker=SpeakerType.USER,
             timestamp="invalid-timestamp",
             content="Test message"
@@ -78,6 +85,7 @@ def test_message_validation():
     # Test empty content
     with pytest.raises(ValidationError):
         Message(
+            session_id="test-session",
             speaker=SpeakerType.USER,
             timestamp=datetime.now().isoformat(),
             content=""
@@ -86,6 +94,7 @@ def test_message_validation():
     # Test whitespace-only content
     with pytest.raises(ValidationError) as exc_info:
         Message(
+            session_id="test-session",
             speaker=SpeakerType.USER,
             timestamp=datetime.now().isoformat(),
             content="   "

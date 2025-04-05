@@ -62,9 +62,13 @@ class Message(BaseModel):
 class Session(BaseModel):
     session_id: str
     created_at: str
-    chat_history: List[Message] = []
-    newsletter_sections: Dict[str, str] = {}
     messages: List[Message] = []
+    newsletter_sections: Dict[str, str] = {}
+
+    @property
+    def chat_history(self) -> List[Message]:
+        """Maintain backwards compatibility with tests expecting chat_history"""
+        return self.messages
 
 class SectionType(str, Enum):
     THESIS = "thesis"
@@ -118,7 +122,11 @@ def start_session():
 def get_session(session_id: str):
     if session_id not in sessions:
         raise HTTPException(status_code=404, detail="Session not found")
-    return sessions[session_id]
+    session = sessions[session_id]
+    # Convert to dict and add chat_history for backwards compatibility
+    session_dict = session.model_dump()
+    session_dict["chat_history"] = session_dict["messages"]
+    return session_dict
 
 @app.post("/message")
 async def create_message(message: Message):
@@ -126,51 +134,48 @@ async def create_message(message: Message):
         if message.session_id not in sessions:
             raise HTTPException(status_code=404, detail="Session not found")
         
+        # Validate content
+        if not message.content.strip():
+            raise HTTPException(status_code=400, detail="Message content cannot be empty")
+        
         session = sessions[message.session_id]
         
         # Add user message to session
         session.messages.append(message)
         
-        # Generate AI response
         try:
-            # Format previous messages for context
-            previous_messages = [
-                {
-                    "role": "user" if msg.speaker == SpeakerType.USER else "assistant",
-                    "content": msg.content
-                }
-                for msg in session.messages[-5:]  # Get last 5 messages for context
-            ]
-
-            # Call OpenAI service
+            # Generate AI response
             openai_service = get_openai_service()
+            context = {
+                "previous_messages": [msg.model_dump() for msg in session.messages[-5:]],
+                "current_message": message.content
+            }
+            
             ai_response = await openai_service.generate_response(
-                system_prompt="You are a helpful AI assistant specializing in newsletter creation. Help the user create their newsletter.",
-                context={
-                    "previous_messages": previous_messages,
-                    "current_message": message.content
-                }
+                "You are a helpful AI assistant specializing in newsletter creation.",
+                context
             )
-
-            # Create AI message
+            
+            # Create and store AI message
             ai_message = Message(
                 session_id=message.session_id,
                 speaker=SpeakerType.ASSISTANT,
                 content=ai_response,
-                timestamp=datetime.now().isoformat(),
-                metadata={}
+                timestamp=datetime.now().isoformat()
             )
-
-            # Add AI message to session
             session.messages.append(ai_message)
             
             return ai_message
-
-        except OpenAIServiceError as e:
+            
+        except Exception as e:
+            print(f"Error in create_message: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
             
+    except HTTPException as he:
+        print(f"Error in create_message: {he.status_code}: {he.detail}")
+        raise he
     except Exception as e:
-        print(f"Error in create_message: {str(e)}")  # Add logging
+        print(f"Error in create_message: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate/section")

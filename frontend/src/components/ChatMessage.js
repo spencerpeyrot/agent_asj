@@ -1,14 +1,17 @@
 import React from 'react';
 import PropTypes from 'prop-types';
+import FormattedResponse from './FormattedResponse';
 
 const ChatMessage = ({ message }) => {
+  const { speaker, content } = message;
+  
   return (
-    <div className={`message ${message.speaker}`}>
-      <span className="speaker">{message.speaker}</span>
-      <p>{message.content}</p>
-      <span className="timestamp">
-        {new Date(message.timestamp).toLocaleTimeString()}
-      </span>
+    <div className={`message ${speaker}`}>
+      {speaker === 'assistant' ? (
+        <FormattedResponse content={content} />
+      ) : (
+        <p>{content}</p>
+      )}
     </div>
   );
 };

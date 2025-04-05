@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 from app.main import app
 import pytest
+from datetime import datetime
 
 client = TestClient(app)
 
@@ -21,22 +22,23 @@ def test_complete_chat_flow():
         message = {
             "session_id": session_id,
             "speaker": "user",
-            "content": msg
+            "content": msg,
+            "timestamp": datetime.now().isoformat()
         }
         response = client.post("/message", json=message)
         assert response.status_code == 200
-        assert response.json()["speaker"] == "system"
+        assert response.json()["speaker"] == "assistant"
     
     # 3. Verify chat history
     session_response = client.get(f"/session/{session_id}")
     assert session_response.status_code == 200
-    chat_history = session_response.json()["chat_history"]
+    message_history = session_response.json()["messages"]
     
     # Should have 6 messages (3 user messages + 3 system responses)
-    assert len(chat_history) == 6
+    assert len(message_history) == 6
     
     # Verify message order and content
     for i, msg in enumerate(messages):
-        assert chat_history[i*2]["content"] == msg
-        assert chat_history[i*2]["speaker"] == "user"
-        assert chat_history[i*2+1]["speaker"] == "system" 
+        assert message_history[i*2]["content"] == msg
+        assert message_history[i*2]["speaker"] == "user"
+        assert message_history[i*2+1]["speaker"] == "assistant" 

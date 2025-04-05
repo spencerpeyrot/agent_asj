@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 from templates.prompts import PROMPT_TEMPLATES
 from dotenv import load_dotenv
+import logging
 
 # Load environment variables
 load_dotenv()
@@ -67,7 +68,7 @@ class OpenAIService:
         except Exception as e:
             raise OpenAIServiceError(f"Unexpected error: {str(e)}")
 
-    async def generate_response(self, system_prompt: str, context: Dict) -> str:
+    async def generate_response(self, system_prompt: str, context: dict) -> str:
         """
         Generate a response using OpenAI's chat completion.
         
@@ -82,23 +83,39 @@ class OpenAIService:
             raise OpenAIServiceError("OPENAI_API_KEY environment variable is not set")
 
         try:
-            messages = [{"role": "system", "content": system_prompt}]
+            formatted_system_prompt = f"""
+            {system_prompt}
             
-            # Add previous messages
-            for msg in context.get("previous_messages", []):
-                messages.append(msg)
-
-            # Call OpenAI API
+            Format your responses as follows:
+            - Use '# ' for main headings
+            - Use '## ' for subheadings
+            - Use '### ' for section titles
+            - Use bullet points with '- ' for lists
+            - Structure your response like a professional report with clear sections
+            """
+            
+            messages = [
+                {"role": "system", "content": formatted_system_prompt}
+            ]
+            
+            # Add previous messages for context
+            if "previous_messages" in context:
+                for msg in context["previous_messages"]:
+                    messages.append({
+                        "role": "user" if msg["speaker"] == "user" else "assistant",
+                        "content": msg["content"]
+                    })
+            
+            # Add current message
+            if "current_message" in context:
+                messages.append({"role": "user", "content": context["current_message"]})
+            
             response = await self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
-                messages=messages,
-                temperature=0.7,
-                max_tokens=500
+                messages=messages
             )
-
-            return response.choices[0].message.content.strip()
-
-        except OpenAIError as e:
-            raise OpenAIServiceError(f"OpenAI API error: {str(e)}")
+            
+            return response.choices[0].message.content
         except Exception as e:
-            raise OpenAIServiceError(f"Unexpected error: {str(e)}") 
+            logging.error(f"Error generating response: {str(e)}")
+            return f"I'm sorry, I encountered an error: {str(e)}" 

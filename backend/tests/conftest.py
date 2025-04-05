@@ -8,23 +8,15 @@ def client():
     return TestClient(app)
 
 @pytest.fixture(autouse=True)
-def mock_openai_service():
-    # Store the original get_openai_service function
-    original_get_service = getattr(get_openai_service, "_instance", None)
-    
-    # Replace with mock service
-    get_openai_service._instance = MockOpenAIService()
-    
-    yield
-    
-    # Restore original service if it existed
-    if original_get_service:
-        get_openai_service._instance = original_get_service
-    else:
-        delattr(get_openai_service, "_instance")
+def mock_openai_service(monkeypatch):
+    """Replace the real OpenAI service with a mock for all tests"""
+    mock_service = MockOpenAIService()
+    monkeypatch.setattr("app.main.get_openai_service", lambda: mock_service)
+    return mock_service
 
 @pytest.fixture
 def test_session(client):
+    """Create a test session and return its ID"""
     response = client.post("/session/start")
     return response.json()["session_id"]
 
