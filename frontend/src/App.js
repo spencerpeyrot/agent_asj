@@ -64,32 +64,51 @@ function App() {
 
   const sendMessage = async (e) => {
     e.preventDefault();
-    
-    if (!inputValue.trim() || sending) return;
-    
-    const userMessage = {
-      session_id: sessionId,
-      speaker: 'user',
-      timestamp: new Date().toISOString(),
-      content: inputValue.trim(),
-      metadata: {}
-    };
-    
-    console.log('Sending message with data:', userMessage);
-    
-    // Update UI immediately
-    setMessages([...messages, userMessage]);
-    setInputValue('');
+    if (!inputValue.trim()) return;
+
     setSending(true);
+    setError(null);
     
     try {
-      // Send to API
-      const response = await axios.post(`${API_BASE_URL}/message`, userMessage);
+      // Add user message to UI immediately
+      const userMessage = {
+        session_id: sessionId,
+        speaker: "user",
+        timestamp: new Date().toISOString(),
+        content: inputValue,
+        metadata: {}
+      };
       
-      // Add assistant's response
-      setMessages(prev => [...prev, response.data]);
-    } catch (err) {
-      console.error('Error sending message:', err);
+      // Add to local state first
+      setMessages(prevMessages => [...prevMessages, userMessage]);
+      
+      // Send message to backend
+      const response = await axios.post(`${API_BASE_URL}/message`, userMessage);
+      console.log('API response:', response.data);
+      
+      // Create the AI message correctly from the response data
+      if (response.data && typeof response.data === 'object') {
+        const aiMessage = {
+          session_id: sessionId,
+          speaker: "assistant",
+          timestamp: new Date().toISOString(),
+          content: response.data.content || "",
+          metadata: response.data.message_metadata || {}
+        };
+        
+        console.log("AI message being added:", aiMessage);
+        
+        // Add AI response to messages
+        setMessages(prevMessages => [...prevMessages, aiMessage]);
+      } else {
+        console.error('Invalid response format:', response.data);
+        setError('Received invalid response format from server');
+      }
+      
+      // Clear input
+      setInputValue('');
+    } catch (error) {
+      console.error('Error sending message:', error);
       setError('Failed to send message. Please try again.');
     } finally {
       setSending(false);
@@ -102,9 +121,24 @@ function App() {
     try {
       const response = await axios.get(`${API_BASE_URL}/session/${sessionId}`);
       setSessionId(sessionId);
-      setMessages(response.data.messages || []);
+      
+      // Extract messages from the response and format them properly
+      const sessionMessages = response.data.messages || [];
+      
+      // Format messages to ensure they have all required properties
+      const formattedMessages = sessionMessages.map(msg => ({
+        session_id: msg.session_id,
+        speaker: msg.speaker,
+        content: msg.content,
+        timestamp: msg.timestamp || new Date().toISOString(),
+        metadata: msg.message_metadata || {}
+      }));
+      
+      setMessages(formattedMessages);
       localStorage.setItem('sessionId', sessionId);
       setSidebarOpen(false); // Close sidebar after selection
+      
+      console.log(`Loaded session ${sessionId} with ${formattedMessages.length} messages`);
     } catch (err) {
       console.error('Error loading session:', err);
       setError('Failed to load selected session');

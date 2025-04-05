@@ -1,17 +1,26 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import FormattedResponse from './FormattedResponse';
+import ReactMarkdown from 'react-markdown';
 
 const ChatMessage = ({ message }) => {
-  const { speaker, content } = message;
+  const isUser = message.speaker === 'user';
+  
+  console.log("Rendering message:", message);
   
   return (
-    <div className={`message ${speaker}`}>
-      {speaker === 'assistant' ? (
-        <FormattedResponse content={content} />
-      ) : (
-        <p>{content}</p>
-      )}
+    <div className={`message ${isUser ? 'user-message' : 'assistant-message'}`}>
+      <div className="message-content">
+        {isUser ? (
+          <div>{message.content}</div>
+        ) : (
+          <div>
+            <ReactMarkdown>{message.content || ""}</ReactMarkdown>
+          </div>
+        )}
+      </div>
+      <div className="message-timestamp">
+        {new Date(message.timestamp).toLocaleTimeString()}
+      </div>
     </div>
   );
 };
@@ -19,8 +28,8 @@ const ChatMessage = ({ message }) => {
 ChatMessage.propTypes = {
   message: PropTypes.shape({
     speaker: PropTypes.string.isRequired,
-    content: PropTypes.string.isRequired,
-    timestamp: PropTypes.string.isRequired
+    content: PropTypes.string,
+    timestamp: PropTypes.string
   }).isRequired
 };
 

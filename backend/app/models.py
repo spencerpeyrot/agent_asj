@@ -1,22 +1,35 @@
-from pydantic import BaseModel, Field
-from typing import Dict, Optional
+from sqlalchemy import Column, String, DateTime, ForeignKey, JSON
+from sqlalchemy.orm import relationship
 from datetime import datetime
 from enum import Enum
+import uuid
+from .database import Base
 
+# Enum for speaker types
 class SpeakerType(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
 
-class Message(BaseModel):
-    session_id: str
-    speaker: SpeakerType
-    content: str
-    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
-    metadata: Dict = Field(default_factory=dict)
+def generate_uuid():
+    return str(uuid.uuid4())
 
-    @field_validator('content')
-    def content_not_empty(cls, v):
-        if not v.strip():
-            raise ValueError("Content cannot be empty")
-        return v.strip() 
+# SQLAlchemy models
+class DBSession(Base):
+    __tablename__ = "sessions"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    messages = relationship("DBMessage", back_populates="session", cascade="all, delete-orphan")
+
+class DBMessage(Base):
+    __tablename__ = "messages"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    session_id = Column(String, ForeignKey("sessions.id"))
+    speaker = Column(String)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    content = Column(String)
+    message_metadata = Column(JSON, default={})
+    
+    session = relationship("DBSession", back_populates="messages") 

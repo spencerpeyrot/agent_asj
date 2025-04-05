@@ -1,5 +1,5 @@
 from openai import AsyncOpenAI, OpenAIError
-from typing import Optional, Dict
+from typing import Optional, Dict, List, Any
 import os
 from datetime import datetime
 from templates.prompts import PROMPT_TEMPLATES
@@ -9,6 +9,10 @@ import logging
 # Load environment variables
 load_dotenv()
 
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 class OpenAIServiceError(Exception):
     """Custom exception for OpenAI service errors"""
     pass
@@ -17,7 +21,9 @@ class OpenAIService:
     def __init__(self):
         self.api_key = os.getenv("OPENAI_API_KEY")
         if not self.api_key:
-            raise OpenAIServiceError("OPENAI_API_KEY environment variable is not set")
+            raise OpenAIServiceError("OPENAI_API_KEY not found in environment variables")
+        
+        logger.debug("Initializing AsyncOpenAI client")
         self.client = AsyncOpenAI(api_key=self.api_key)
 
     async def generate_section_content(
@@ -68,54 +74,49 @@ class OpenAIService:
         except Exception as e:
             raise OpenAIServiceError(f"Unexpected error: {str(e)}")
 
-    async def generate_response(self, system_prompt: str, context: dict) -> str:
-        """
-        Generate a response using OpenAI's chat completion.
-        
-        Args:
-            system_prompt: The system message to set the AI's role
-            context: Dictionary containing previous messages and current message
-        
-        Returns:
-            Generated response as a string
-        """
-        if not self.api_key:
-            raise OpenAIServiceError("OPENAI_API_KEY environment variable is not set")
-
+    async def generate_response(self, messages: List[Dict[str, str]], context: Dict[str, Any]) -> str:
         try:
-            formatted_system_prompt = f"""
-            {system_prompt}
+            logger.debug(f"Generating response with context: {context}")
+            logger.debug(f"Messages being sent to OpenAI: {messages}")
+
+            # Format messages for the API
+            formatted_messages = []
             
-            Format your responses as follows:
-            - Use '# ' for main headings
-            - Use '## ' for subheadings
-            - Use '### ' for section titles
-            - Use bullet points with '- ' for lists
-            - Structure your response like a professional report with clear sections
-            """
+            # Add system message
+            formatted_messages.append({
+                "role": "system",
+                "content": "You are a helpful AI assistant specializing in financial analysis and newsletter writing."
+            })
             
-            messages = [
-                {"role": "system", "content": formatted_system_prompt}
-            ]
-            
-            # Add previous messages for context
-            if "previous_messages" in context:
-                for msg in context["previous_messages"]:
-                    messages.append({
-                        "role": "user" if msg["speaker"] == "user" else "assistant",
-                        "content": msg["content"]
-                    })
-            
-            # Add current message
-            if "current_message" in context:
-                messages.append({"role": "user", "content": context["current_message"]})
-            
-            response = await self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=messages
-            )
-            
-            return response.choices[0].message.content
+            # Add conversation history
+            for msg in messages:
+                formatted_messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+
+            logger.debug(f"Formatted messages for OpenAI: {formatted_messages}")
+
+            # Make the API call
+            try:
+                response = await self.client.chat.completions.create(
+                    model="gpt-3.5-turbo",  # or your preferred model
+                    messages=formatted_messages,
+                    temperature=0.7,
+                    max_tokens=2000
+                )
+                
+                logger.debug(f"Raw OpenAI response: {response}")
+                
+                if not response.choices or not response.choices[0].message:
+                    raise OpenAIServiceError("No response received from OpenAI")
+                
+                return response.choices[0].message.content
+
+            except Exception as e:
+                logger.error(f"OpenAI API call failed: {str(e)}", exc_info=True)
+                raise OpenAIServiceError(f"OpenAI API call failed: {str(e)}")
+
         except Exception as e:
-            logging.error(f"Error generating response: {str(e)}")
-            return f"I'm sorry, I encountered an error: {str(e)}" 
+            logger.error(f"Error in generate_response: {str(e)}", exc_info=True)
+            raise OpenAIServiceError(f"Failed to generate response: {str(e)}") 

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator, ValidationError
 from typing import List, Dict, Optional
@@ -8,9 +8,17 @@ from enum import Enum, auto
 from services.openai_service import OpenAIService, OpenAIServiceError
 from dotenv import load_dotenv
 import os
+from sqlalchemy.orm import Session
+from . import models, schemas, database
+from .database import get_db
+import logging
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Create the FastAPI app instance
 app = FastAPI()
@@ -23,20 +31,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Define the Message model first
-class Message(BaseModel):
-    session_id: str
-    speaker: str
-    timestamp: str
-    content: str
-    metadata: Optional[dict] = {}
-
-# Then define the Session model that uses Message
-class Session(BaseModel):
-    session_id: str
-    created_at: datetime
-    messages: List[Message] = []
 
 # Now we can define the sessions dictionary
 sessions: Dict[str, Session] = {}
@@ -91,88 +85,122 @@ def read_root():
     return {"message": "Newsletter Builder API"}
 
 @app.post("/session")
-async def create_session():
-    session_id = str(uuid.uuid4())
-    sessions[session_id] = Session(
-        session_id=session_id,
-        created_at=datetime.now(),
-        messages=[]
-    )
-    return {"session_id": session_id}
+async def create_session(db: Session = Depends(get_db)):
+    db_session = models.DBSession()
+    db.add(db_session)
+    db.commit()
+    db.refresh(db_session)
+    return {"session_id": db_session.id}
 
 @app.get("/sessions")
-async def get_sessions():
+async def get_sessions(db: Session = Depends(get_db)):
+    sessions = db.query(models.DBSession).order_by(models.DBSession.created_at.desc()).all()
     return {
         "sessions": [
             {
-                "id": session_id,
+                "id": session.id,
                 "created_at": session.created_at,
                 "message_count": len(session.messages)
             }
-            for session_id, session in sessions.items()
+            for session in sessions
         ]
     }
 
 @app.get("/session/{session_id}")
-async def get_session(session_id: str):
-    if session_id not in sessions:
+async def get_session(session_id: str, db: Session = Depends(get_db)):
+    session = db.query(models.DBSession).filter(models.DBSession.id == session_id).first()
+    if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    return sessions[session_id]
+    
+    # Format messages to be properly returned to frontend
+    messages = db.query(models.DBMessage).filter(models.DBMessage.session_id == session_id).all()
+    formatted_messages = [
+        {
+            "id": msg.id,
+            "session_id": msg.session_id,
+            "speaker": msg.speaker,
+            "timestamp": msg.timestamp.isoformat(),
+            "content": msg.content,
+            "message_metadata": msg.message_metadata
+        }
+        for msg in messages
+    ]
+    
+    # Return formatted session data
+    return {
+        "id": session.id,
+        "session_id": session.id,
+        "created_at": session.created_at.isoformat(),
+        "messages": formatted_messages
+    }
 
 @app.post("/message")
-async def create_message(message: Message):
+async def create_message(message: schemas.Message, db: Session = Depends(get_db)):
     try:
-        if message.session_id not in sessions:
-            raise HTTPException(status_code=404, detail="Session not found")
+        logger.debug(f"Received message request: {message.dict()}")
         
-        # Add user message to session
-        sessions[message.session_id].messages.append(message)
+        session = db.query(models.DBSession).filter(models.DBSession.id == message.session_id).first()
+        if not session:
+            logger.error(f"Session not found: {message.session_id}")
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Create user message
+        logger.debug("Creating user message in database")
+        db_message = models.DBMessage(
+            session_id=message.session_id,
+            speaker=message.speaker,
+            content=message.content,
+            message_metadata=message.metadata
+        )
+        db.add(db_message)
+        db.commit()
+        
+        # Get previous messages for context
+        previous_messages = [
+            {"role": msg.speaker, "content": msg.content}
+            for msg in session.messages
+        ]
+        logger.debug(f"Previous messages context: {previous_messages}")
         
         # Generate AI response
-        openai_service = get_openai_service()
-        previous_messages = [
-            {"role": "user" if msg.speaker == "user" else "assistant", "content": msg.content}
-            for msg in sessions[message.session_id].messages
-        ]
-        
-        print(f"Sending messages to OpenAI: {previous_messages}")  # Debug log
-        
-        # Create a context dictionary from the message content
-        context = {
-            "messages": previous_messages,
-            "session_id": message.session_id,
-            # Add any other context needed by your OpenAI service
-        }
-        
-        ai_response = await openai_service.generate_response(previous_messages, context)
-        
+        logger.debug("Calling OpenAI service for response")
+        try:
+            ai_response = await get_openai_service().generate_response(
+                messages=previous_messages,
+                context={
+                    "session_id": message.session_id,
+                    "current_time": datetime.now().isoformat()
+                }
+            )
+            logger.debug(f"Received AI response: {ai_response}")
+        except Exception as e:
+            logger.error(f"Error generating AI response: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Error generating AI response: {str(e)}")
+
         # Create AI message
-        ai_message = Message(
+        logger.debug("Creating AI message in database")
+        ai_db_message = models.DBMessage(
             session_id=message.session_id,
             speaker="assistant",
-            timestamp=datetime.now().isoformat(),
             content=ai_response,
-            metadata={}
+            message_metadata={}
         )
+        db.add(ai_db_message)
+        db.commit()
         
-        # Add AI message to session
-        sessions[message.session_id].messages.append(ai_message)
-        
-        return ai_message
-    
-    except HTTPException as he:
-        raise he
-    except OpenAIServiceError as oe:
-        print(f"OpenAI Service Error: {str(oe)}")  # Debug log
-        raise HTTPException(status_code=503, detail=str(oe))
+        # Return a properly serialized response
+        return {
+            "id": ai_db_message.id,
+            "session_id": ai_db_message.session_id,
+            "speaker": ai_db_message.speaker,
+            "timestamp": ai_db_message.timestamp.isoformat(),
+            "content": ai_db_message.content,
+            "message_metadata": ai_db_message.message_metadata
+        }
     except Exception as e:
-        import traceback
-        print(f"Unexpected error: {str(e)}")  # Debug log
-        print(traceback.format_exc())  # Print full traceback
-        raise HTTPException(
-            status_code=500,
-            detail=f"An unexpected error occurred: {str(e)}"
-        )
+        logger.error(f"Unexpected error in create_message: {str(e)}", exc_info=True)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate/section")
 async def generate_section(request: SectionGenerationRequest):
