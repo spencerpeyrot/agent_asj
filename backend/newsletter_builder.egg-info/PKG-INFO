@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: newsletter-builder
+Version: 0.1
+Requires-Dist: fastapi
+Requires-Dist: uvicorn
+Requires-Dist: pydantic
+Requires-Dist: openai
+Requires-Dist: python-dotenv
+Dynamic: requires-dist

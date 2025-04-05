@@ -1,0 +1,7 @@
+# Environment variables
+backend/.env
+backend/__pycache__/
+backend/**/__pycache__/
+backend/venv/
+frontend/node_modules/
+.DS_Store
