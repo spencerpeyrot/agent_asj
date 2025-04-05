@@ -6,6 +6,11 @@ import uuid
 from datetime import datetime
 from enum import Enum, auto
 from services.openai_service import OpenAIService, OpenAIServiceError
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Create the FastAPI app instance
 app = FastAPI()
@@ -31,12 +36,14 @@ def get_openai_service():
 class SpeakerType(str, Enum):
     USER = "user"
     SYSTEM = "system"
+    ASSISTANT = "assistant"
 
 class Message(BaseModel):
     speaker: SpeakerType
     timestamp: str
     content: str = Field(..., min_length=1)
     metadata: Optional[Dict] = None
+    session_id: str
 
     @field_validator('timestamp')
     def validate_timestamp(cls, v):
@@ -57,6 +64,7 @@ class Session(BaseModel):
     created_at: str
     chat_history: List[Message] = []
     newsletter_sections: Dict[str, str] = {}
+    messages: List[Message] = []
 
 class SectionType(str, Enum):
     THESIS = "thesis"
@@ -113,35 +121,57 @@ def get_session(session_id: str):
     return sessions[session_id]
 
 @app.post("/message")
-def create_message(message: dict):
-    session_id = message.get("session_id")
-    if not session_id or session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-    
+async def create_message(message: Message):
     try:
-        new_message = Message(
-            speaker=message.get("speaker", "user"),
-            timestamp=datetime.now().isoformat(),
-            content=message.get("content", ""),
-            metadata=message.get("metadata")
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    
-    session = sessions[session_id]
-    session.chat_history.append(new_message)
-    
-    # For now, just echo back the message
-    system_response = Message(
-        speaker=SpeakerType.SYSTEM,
-        timestamp=datetime.now().isoformat(),
-        content=f"Received: {new_message.content}",
-        metadata=None
-    )
-    
-    session.chat_history.append(system_response)
-    
-    return system_response
+        if message.session_id not in sessions:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        session = sessions[message.session_id]
+        
+        # Add user message to session
+        session.messages.append(message)
+        
+        # Generate AI response
+        try:
+            # Format previous messages for context
+            previous_messages = [
+                {
+                    "role": "user" if msg.speaker == SpeakerType.USER else "assistant",
+                    "content": msg.content
+                }
+                for msg in session.messages[-5:]  # Get last 5 messages for context
+            ]
+
+            # Call OpenAI service
+            openai_service = get_openai_service()
+            ai_response = await openai_service.generate_response(
+                system_prompt="You are a helpful AI assistant specializing in newsletter creation. Help the user create their newsletter.",
+                context={
+                    "previous_messages": previous_messages,
+                    "current_message": message.content
+                }
+            )
+
+            # Create AI message
+            ai_message = Message(
+                session_id=message.session_id,
+                speaker=SpeakerType.ASSISTANT,
+                content=ai_response,
+                timestamp=datetime.now().isoformat(),
+                metadata={}
+            )
+
+            # Add AI message to session
+            session.messages.append(ai_message)
+            
+            return ai_message
+
+        except OpenAIServiceError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+            
+    except Exception as e:
+        print(f"Error in create_message: {str(e)}")  # Add logging
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/generate/section")
 async def generate_section(request: SectionGenerationRequest):
@@ -176,6 +206,55 @@ async def generate_section(request: SectionGenerationRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except OpenAIServiceError as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+@app.get("/health")
+async def health_check():
+    """Basic health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/health/openai")
+async def check_openai():
+    """Check OpenAI API connection"""
+    try:
+        openai_service = get_openai_service()
+        if not openai_service.api_key:
+            return {
+                "status": "error",
+                "message": "OPENAI_API_KEY not set",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        # Test a simple completion
+        response = await openai_service.client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": "Hello"}],
+            max_tokens=5
+        )
+        
+        # Check if we got a valid response
+        if response and response.choices:
+            return {
+                "status": "healthy",
+                "message": "OpenAI API connection successful",
+                "response": response.choices[0].message.content,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "No response from OpenAI API",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
 
 if __name__ == "__main__":
     import uvicorn
