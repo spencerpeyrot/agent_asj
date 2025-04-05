@@ -261,6 +261,25 @@ async def check_openai():
             "timestamp": datetime.now().isoformat()
         }
 
+@app.get("/sessions")
+async def get_sessions():
+    """Return a list of all sessions with preview information"""
+    session_list = []
+    
+    for session_id, session in sessions.items():
+        # Create a simplified version with just essential info
+        preview_data = {
+            "session_id": session_id,
+            "created_at": session.created_at,
+            "messages": session.messages if hasattr(session, 'messages') else []
+        }
+        session_list.append(preview_data)
+    
+    # Sort by creation date (newest first)
+    session_list.sort(key=lambda x: x["created_at"], reverse=True)
+    
+    return session_list
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
