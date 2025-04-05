@@ -22,7 +22,7 @@ const Sidebar = ({ isOpen, onClose, onSessionSelect, currentSessionId }) => {
     setError(null);
     try {
       const response = await axios.get(`${API_BASE_URL}/sessions`);
-      setSessions(response.data);
+      setSessions(response.data.sessions);
     } catch (err) {
       console.error('Error fetching sessions:', err);
       setError('Failed to load previous sessions');
@@ -61,34 +61,38 @@ const Sidebar = ({ isOpen, onClose, onSessionSelect, currentSessionId }) => {
     return 'No preview available';
   };
 
+  // Check if sessions exists and is an array before mapping
+  const renderSessions = () => {
+    if (!sessions || !Array.isArray(sessions)) {
+      return <p>No sessions available</p>;
+    }
+
+    return sessions.map((session) => (
+      <div
+        key={session.id}
+        className={`session-item ${session.id === currentSessionId ? 'active' : ''}`}
+        onClick={() => onSessionSelect(session.id)}
+      >
+        <div className="session-info">
+          <span className="session-date">
+            {format(new Date(session.created_at), 'MMM d, yyyy h:mm a')}
+          </span>
+          <span className="message-count">
+            {session.message_count} messages
+          </span>
+        </div>
+      </div>
+    ));
+  };
+
   return (
     <div className={`sidebar ${isOpen ? 'open' : ''}`}>
       <div className="sidebar-header">
-        <h2>Recent Conversations</h2>
-        <button className="close-btn" onClick={onClose}>×</button>
+        <h2>Chat History</h2>
+        <button className="close-button" onClick={onClose}>×</button>
       </div>
-      
-      <div className="sidebar-content">
-        {loading ? (
-          <div className="sidebar-loading">Loading sessions...</div>
-        ) : error ? (
-          <div className="sidebar-error">{error}</div>
-        ) : sessions.length === 0 ? (
-          <div className="sidebar-empty">No previous sessions found</div>
-        ) : (
-          <ul className="session-list">
-            {sessions.map(session => (
-              <li 
-                key={session.session_id}
-                className={`session-item ${session.session_id === currentSessionId ? 'active' : ''}`}
-                onClick={() => onSessionSelect(session.session_id)}
-              >
-                <div className="session-preview">{getSessionPreview(session)}</div>
-                <div className="session-date">{formatSessionDate(session.created_at)}</div>
-              </li>
-            ))}
-          </ul>
-        )}
+      <div className="sessions-list">
+        {renderSessions()}
       </div>
       
       <div className="sidebar-footer">

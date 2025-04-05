@@ -5,6 +5,7 @@ import ChatMessage from './components/ChatMessage';
 import Sidebar from './components/Sidebar';
 import TestPage from './components/TestPage';
 import './styles/Sidebar.css';
+import { useNavigate } from 'react-router-dom';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -12,15 +13,45 @@ function App() {
   const [sessionId, setSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sending, setSending] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showTestPage, setShowTestPage] = useState(false);
   const messagesEndRef = useRef(null);
+  const navigate = useNavigate();
+  const [isLoading, setIsLoading] = useState(true);
+  const [sessions, setSessions] = useState([]);
 
   useEffect(() => {
-    initializeSession();
+    const initializeApp = async () => {
+      try {
+        setIsLoading(true);
+        // Create initial session if none exists
+        const response = await axios.post(`${API_BASE_URL}/session`);
+        const newSessionId = response.data.session_id;
+        setSessionId(newSessionId);
+        
+        try {
+          // Load existing sessions
+          const sessionsResponse = await axios.get(`${API_BASE_URL}/sessions`);
+          if (sessionsResponse.data.sessions && sessionsResponse.data.sessions.length > 0) {
+            setMessages(sessionsResponse.data.sessions[0].messages || []);
+            setSessions(sessionsResponse.data.sessions);
+          }
+        } catch (sessionsError) {
+          console.error('Error loading sessions:', sessionsError);
+          // Don't block initialization if sessions can't be loaded
+        }
+        
+        setIsLoading(false);
+      } catch (error) {
+        console.error('Error initializing app:', error);
+        setError('Failed to initialize the application. Please refresh the page.');
+        setIsLoading(false);
+      }
+    };
+
+    initializeApp();
   }, []);
 
   useEffect(() => {
@@ -29,41 +60,6 @@ function App() {
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
-  const initializeSession = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      // Check localStorage first
-      const storedId = localStorage.getItem('sessionId');
-      if (storedId) {
-        // Try to load existing session
-        try {
-          const response = await axios.get(`${API_BASE_URL}/session/${storedId}`);
-          setSessionId(storedId);
-          setMessages(response.data.messages || []);
-          setLoading(false);
-          return;
-        } catch (err) {
-          // Session not found or error, create new one
-          console.error('Failed to load stored session:', err);
-          localStorage.removeItem('sessionId');
-        }
-      }
-      
-      // Create new session
-      const response = await axios.post(`${API_BASE_URL}/session/start`);
-      const newSessionId = response.data.session_id;
-      localStorage.setItem('sessionId', newSessionId);
-      setSessionId(newSessionId);
-      setMessages([]);
-    } catch (err) {
-      setError('Failed to initialize session');
-      console.error('Session initialization error:', err);
-    } finally {
-      setLoading(false);
-    }
   };
 
   const sendMessage = async (e) => {
@@ -101,7 +97,7 @@ function App() {
   };
 
   const loadSession = async (sessionId) => {
-    setLoading(true);
+    setIsLoading(true);
     setError(null);
     try {
       const response = await axios.get(`${API_BASE_URL}/session/${sessionId}`);
@@ -113,7 +109,7 @@ function App() {
       console.error('Error loading session:', err);
       setError('Failed to load selected session');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
@@ -171,7 +167,29 @@ function App() {
     }
   };
 
-  if (loading) {
+  const handleNewSession = async () => {
+    try {
+      // Create new session
+      const response = await axios.post(`${API_BASE_URL}/session`);
+      const newSessionId = response.data.session_id;
+      
+      // Clear current messages
+      setMessages([]);
+      setInputValue('');
+      
+      // Update session ID and add to sidebar
+      setSessionId(newSessionId);
+      localStorage.setItem('sessionId', newSessionId);
+
+      // Update URL to reflect new session
+      navigate(`/chat/${newSessionId}`);
+    } catch (error) {
+      console.error('Error creating new session:', error);
+      // Add error handling UI feedback here
+    }
+  };
+
+  if (isLoading) {
     return (
       <div className="loading-container">
         <div className="loading-spinner"></div>
@@ -190,7 +208,7 @@ function App() {
       
       {/* Sidebar component */}
       <Sidebar 
-        isOpen={sidebarOpen} 
+        isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         onSessionSelect={loadSession}
         currentSessionId={sessionId}
@@ -210,7 +228,7 @@ function App() {
             <button onClick={() => setShowTestPage(!showTestPage)}>
               {showTestPage ? 'Back to Chat' : 'Check API Status'}
             </button>
-            <button onClick={initializeSession}>New Session</button>
+            <button onClick={handleNewSession}>New Session</button>
           </div>
         </header>
         
