@@ -19,6 +19,7 @@ class DBSession(Base):
     __tablename__ = "sessions"
 
     id = Column(String, primary_key=True, default=generate_uuid)
+    title = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     messages = relationship("DBMessage", back_populates="session", cascade="all, delete-orphan")
 

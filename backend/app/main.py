@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator, ValidationError
 from typing import List, Dict, Optional
@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 # Create the FastAPI app instance
 app = FastAPI()
 
-# Enable CORS
+# Update the CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000"],  # Your React app's URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,6 +45,21 @@ class SpeakerType(str, Enum):
     USER = "user"
     SYSTEM = "system"
     ASSISTANT = "assistant"
+
+class MessageCreate(BaseModel):
+    session_id: str
+    speaker: SpeakerType
+    content: str
+    timestamp: str
+    metadata: Optional[Dict] = {}
+
+    @field_validator('timestamp')
+    def validate_timestamp(cls, v):
+        try:
+            datetime.fromisoformat(v)
+        except ValueError:
+            raise ValueError('Invalid timestamp format. Must be ISO format.')
+        return v
 
 class SectionType(str, Enum):
     THESIS = "thesis"
@@ -94,17 +109,38 @@ async def create_session(db: Session = Depends(get_db)):
 
 @app.get("/sessions")
 async def get_sessions(db: Session = Depends(get_db)):
-    sessions = db.query(models.DBSession).order_by(models.DBSession.created_at.desc()).all()
-    return {
-        "sessions": [
-            {
-                "id": session.id,
-                "created_at": session.created_at,
-                "message_count": len(session.messages)
-            }
-            for session in sessions
-        ]
-    }
+    try:
+        # Query all sessions ordered by creation date
+        sessions = db.query(models.DBSession).order_by(models.DBSession.created_at.desc()).all()
+        
+        # Format the response
+        formatted_sessions = []
+        for session in sessions:
+            try:
+                # Get message count for the session
+                message_count = db.query(models.DBMessage).filter(
+                    models.DBMessage.session_id == session.id
+                ).count()
+                
+                # Format the session data
+                formatted_session = {
+                    "id": session.id,
+                    "title": session.title or f"Chat from {session.created_at.strftime('%B %d, %Y')}",
+                    "created_at": session.created_at.isoformat(),
+                    "message_count": message_count
+                }
+                formatted_sessions.append(formatted_session)
+            except Exception as session_error:
+                logger.error(f"Error formatting session {session.id}: {str(session_error)}")
+                continue
+        
+        return {"sessions": formatted_sessions}
+    except Exception as e:
+        logger.error(f"Error fetching sessions: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error fetching sessions: {str(e)}"
+        )
 
 @app.get("/session/{session_id}")
 async def get_session(session_id: str, db: Session = Depends(get_db)):
@@ -135,68 +171,79 @@ async def get_session(session_id: str, db: Session = Depends(get_db)):
     }
 
 @app.post("/message")
-async def create_message(message: schemas.Message, db: Session = Depends(get_db)):
+async def create_message(
+    message: MessageCreate,
+    db: Session = Depends(get_db)
+):
     try:
-        logger.debug(f"Received message request: {message.dict()}")
+        logger.debug(f"Received message request: {message}")
         
-        session = db.query(models.DBSession).filter(models.DBSession.id == message.session_id).first()
+        # Verify session exists
+        session = db.query(models.DBSession).filter(
+            models.DBSession.id == message.session_id
+        ).first()
+        
         if not session:
-            logger.error(f"Session not found: {message.session_id}")
             raise HTTPException(status_code=404, detail="Session not found")
 
         # Create user message
         logger.debug("Creating user message in database")
-        db_message = models.DBMessage(
+        user_message = models.DBMessage(
             session_id=message.session_id,
             speaker=message.speaker,
             content=message.content,
-            message_metadata=message.metadata
+            timestamp=message.timestamp,
+            metadata=message.metadata
         )
-        db.add(db_message)
+        db.add(user_message)
         db.commit()
-        
+
         # Get previous messages for context
-        previous_messages = [
-            {"role": msg.speaker, "content": msg.content}
-            for msg in session.messages
-        ]
-        logger.debug(f"Previous messages context: {previous_messages}")
-        
+        previous_messages = db.query(models.DBMessage).filter(
+            models.DBMessage.session_id == message.session_id
+        ).order_by(models.DBMessage.timestamp).all()
+
+        # Format messages properly for OpenAI
+        messages_context = []
+        for msg in previous_messages:
+            messages_context.append({
+                "role": msg.speaker,  # This will be converted in the service
+                "content": msg.content
+            })
+
+        logger.debug(f"Previous messages context: {messages_context}")
+
         # Generate AI response
         logger.debug("Calling OpenAI service for response")
-        try:
-            ai_response = await get_openai_service().generate_response(
-                messages=previous_messages,
-                context={
-                    "session_id": message.session_id,
-                    "current_time": datetime.now().isoformat()
-                }
-            )
-            logger.debug(f"Received AI response: {ai_response}")
-        except Exception as e:
-            logger.error(f"Error generating AI response: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Error generating AI response: {str(e)}")
+        ai_response = await get_openai_service().generate_response(messages=messages_context)
+        
+        # Log the AI response for debugging
+        logger.debug(f"Received AI response: {ai_response[:100]}...")
 
         # Create AI message
-        logger.debug("Creating AI message in database")
-        ai_db_message = models.DBMessage(
+        ai_message = models.DBMessage(
             session_id=message.session_id,
-            speaker="assistant",
+            speaker=SpeakerType.ASSISTANT,
             content=ai_response,
-            message_metadata={}
+            timestamp=datetime.utcnow().isoformat(),
+            metadata={}
         )
-        db.add(ai_db_message)
+        db.add(ai_message)
         db.commit()
         
-        # Return a properly serialized response
-        return {
-            "id": ai_db_message.id,
-            "session_id": ai_db_message.session_id,
-            "speaker": ai_db_message.speaker,
-            "timestamp": ai_db_message.timestamp.isoformat(),
-            "content": ai_db_message.content,
-            "message_metadata": ai_db_message.message_metadata
+        # Create a properly formatted response that includes all needed data
+        response = {
+            "id": ai_message.id,
+            "session_id": ai_message.session_id,
+            "speaker": ai_message.speaker,
+            "content": ai_message.content,
+            "timestamp": ai_message.timestamp,
+            "metadata": ai_message.metadata or {}
         }
+        
+        logger.debug(f"Returning AI message: {response['id']} with content length {len(response['content'])}")
+        return response
+
     except Exception as e:
         logger.error(f"Unexpected error in create_message: {str(e)}", exc_info=True)
         db.rollback()
@@ -284,6 +331,36 @@ async def check_openai():
             "message": str(e),
             "timestamp": datetime.now().isoformat()
         }
+
+@app.delete("/session/{session_id}")
+async def delete_session(session_id: str, db: Session = Depends(get_db)):
+    session = db.query(models.DBSession).filter(models.DBSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    db.delete(session)
+    db.commit()
+    return {"message": "Session deleted successfully"}
+
+@app.patch("/session/{session_id}")
+async def update_session(
+    session_id: str, 
+    update_data: dict = Body(..., example={"title": "New Title"}), 
+    db: Session = Depends(get_db)
+):
+    session = db.query(models.DBSession).filter(models.DBSession.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    if "title" in update_data:
+        session.title = update_data["title"]
+    
+    db.commit()
+    return {
+        "id": session.id,
+        "title": session.title,
+        "created_at": session.created_at.isoformat()
+    }
 
 if __name__ == "__main__":
     import uvicorn

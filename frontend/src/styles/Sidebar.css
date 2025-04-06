@@ -4,8 +4,8 @@
   top: 0;
   width: 300px;
   height: 100%;
-  background-color: #f5f5f7;
-  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+  background-color: #ffffff;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
   transition: left 0.3s ease;
   z-index: 1000;
   display: flex;
@@ -22,8 +22,10 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: #007AFF;
-  color: white;
+  background-color: #ffffff;
+  color: #333;
+  font-size: 16px;
+  font-weight: bold;
 }
 
 .sidebar-header h2 {
@@ -37,7 +39,7 @@
   border: none;
   font-size: 24px;
   cursor: pointer;
-  color: white;
+  color: #333;
 }
 
 .sidebar-content {
@@ -65,19 +67,114 @@
 }
 
 .session-item {
-  padding: 12px 16px;
-  border-bottom: 1px solid #eaeaea;
+  position: relative;
+  padding: 12px;
+  border-bottom: 1px solid #e9ecef;
   cursor: pointer;
   transition: background-color 0.2s;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .session-item:hover {
-  background-color: #e8e8ea;
+  background-color: #f8f9fa;
 }
 
 .session-item.active {
-  background-color: #e1f5fe;
-  border-left: 3px solid #007AFF;
+  background-color: #f1f3f5;
+}
+
+.session-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.session-title {
+  flex-grow: 1;
+  margin-right: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.kebab-menu {
+  background: none;
+  border: none;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 18px;
+  color: #6c757d;
+  transition: color 0.2s;
+}
+
+.kebab-menu:hover {
+  color: #343a40;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background-color: white;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  z-index: 1000;
+  min-width: 120px;
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dropdown-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #212529;
+  transition: background-color 0.2s;
+}
+
+.dropdown-menu button:hover {
+  background-color: #f8f9fa;
+}
+
+.dropdown-menu button:not(:last-child) {
+  border-bottom: 1px solid #dee2e6;
+}
+
+/* Style for the rename input */
+.session-item form {
+  width: 100%;
+}
+
+.session-item input {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 14px;
 }
 
 .session-preview {
@@ -94,10 +191,12 @@
 .sidebar-footer {
   padding: 12px 16px;
   border-top: 1px solid #e0e0e0;
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.refresh-btn {
+.refresh-btn, .api-status-btn {
   background-color: #007AFF;
   color: white;
   border: none;
@@ -106,9 +205,10 @@
   cursor: pointer;
   font-weight: 500;
   transition: background-color 0.2s;
+  width: 100%;
 }
 
-.refresh-btn:hover {
+.refresh-btn:hover, .api-status-btn:hover {
   background-color: #0062cc;
 }
 
@@ -126,4 +226,20 @@
 
 .sidebar-overlay.visible {
   display: block;
-} 
+}
+
+/* Add these styles to Sidebar.css */
+.sidebar-toggle {
+  background: none;
+  border: none;
+  padding: 10px;
+  cursor: pointer;
+  font-size: 24px;
+  color: #333333;
+  transition: all 0.2s ease;
+}
+
+.sidebar-toggle:hover {
+  color: #007AFF;
+}
+

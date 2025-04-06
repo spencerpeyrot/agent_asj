@@ -21,6 +21,7 @@ function App() {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
   const [sessions, setSessions] = useState([]);
+  const [isTyping, setIsTyping] = useState(false);
 
   useEffect(() => {
     const initializeApp = async () => {
@@ -64,54 +65,82 @@ function App() {
 
   const sendMessage = async (e) => {
     e.preventDefault();
-    if (!inputValue.trim()) return;
+    const messageText = inputValue.trim();
+    if (!messageText) return;
 
-    setSending(true);
-    setError(null);
-    
     try {
-      // Add user message to UI immediately
+      // Add message to UI
       const userMessage = {
+        id: Date.now().toString(),
         session_id: sessionId,
-        speaker: "user",
+        speaker: 'user',
+        content: messageText,
         timestamp: new Date().toISOString(),
-        content: inputValue,
-        metadata: {}
       };
-      
-      // Add to local state first
       setMessages(prevMessages => [...prevMessages, userMessage]);
       
+      // Clear the input immediately after sending
+      setInputValue('');
+
+      // Show typing indicator
+      setIsTyping(true);
+
       // Send message to backend
-      const response = await axios.post(`${API_BASE_URL}/message`, userMessage);
-      console.log('API response:', response.data);
+      console.log('Sending message to backend:', userMessage);
+      const response = await axios.post(`${API_BASE_URL}/message`, {
+        session_id: sessionId,
+        speaker: 'user',
+        content: messageText,
+        timestamp: new Date().toISOString(),
+        metadata: {}
+      });
       
-      // Create the AI message correctly from the response data
-      if (response.data && typeof response.data === 'object') {
+      // Hide typing indicator
+      setIsTyping(false);
+      
+      console.log('Response from backend:', response.data);
+      
+      // Check if we have a valid response
+      if (response.data && response.data.content) {
+        // Create AI message from response
         const aiMessage = {
+          id: response.data.id || Date.now().toString() + '-ai',
           session_id: sessionId,
-          speaker: "assistant",
-          timestamp: new Date().toISOString(),
-          content: response.data.content || "",
-          metadata: response.data.message_metadata || {}
+          speaker: 'assistant',
+          content: response.data.content,
+          timestamp: response.data.timestamp || new Date().toISOString(),
         };
         
-        console.log("AI message being added:", aiMessage);
+        console.log('Created AI message:', aiMessage);
+        console.log('AI message content length:', aiMessage.content.length);
         
-        // Add AI response to messages
+        // Add the AI response to the messages
         setMessages(prevMessages => [...prevMessages, aiMessage]);
       } else {
-        console.error('Invalid response format:', response.data);
-        setError('Received invalid response format from server');
+        console.error('Invalid or empty response from server:', response.data);
+        // Add a fallback message
+        const errorMessage = {
+          id: Date.now().toString() + '-error',
+          session_id: sessionId,
+          speaker: 'assistant',
+          content: 'There was an issue generating a response. Please try again.',
+          timestamp: new Date().toISOString(),
+        };
+        setMessages(prevMessages => [...prevMessages, errorMessage]);
       }
-      
-      // Clear input
-      setInputValue('');
     } catch (error) {
       console.error('Error sending message:', error);
-      setError('Failed to send message. Please try again.');
-    } finally {
-      setSending(false);
+      setError(`Failed to send message: ${error.message}`);
+      
+      // Add an error message to the chat
+      const errorMessage = {
+        id: Date.now().toString() + '-error',
+        session_id: sessionId,
+        speaker: 'assistant',
+        content: `Error: ${error.message}. Please try again.`,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages(prevMessages => [...prevMessages, errorMessage]);
     }
   };
 
@@ -223,7 +252,17 @@ function App() {
     }
   };
 
-  if (isLoading) {
+  const checkApiStatus = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/health/openai`);
+      alert(`API Status: ${response.data.status}`);
+    } catch (error) {
+      console.error('Error checking API status:', error);
+      alert('Error checking API status. Please check the console for details.');
+    }
+  };
+
+  if (isLoading && messages.length === 0) {
     return (
       <div className="loading-container">
         <div className="loading-spinner"></div>
@@ -246,6 +285,7 @@ function App() {
         onClose={() => setSidebarOpen(false)}
         onSessionSelect={loadSession}
         currentSessionId={sessionId}
+        checkApiStatus={checkApiStatus}
       />
       
       {/* Main content */}
@@ -259,9 +299,6 @@ function App() {
           </button>
           <h1>Newsletter Builder</h1>
           <div className="header-buttons">
-            <button onClick={() => setShowTestPage(!showTestPage)}>
-              {showTestPage ? 'Back to Chat' : 'Check API Status'}
-            </button>
             <button onClick={handleNewSession}>New Session</button>
           </div>
         </header>
@@ -283,24 +320,27 @@ function App() {
                   <ChatMessage key={index} message={msg} />
                 ))
               )}
+              
+              {isTyping && (
+                <div className="message assistant-message typing-indicator">
+                  <div className="message-content">
+                    <span className="typing-dots"><span>.</span><span>.</span><span>.</span></span>
+                  </div>
+                </div>
+              )}
+              
               <div ref={messagesEndRef} />
             </div>
             
             <form className="message-form" onSubmit={sendMessage}>
               <textarea
                 value={inputValue}
-                onChange={handleInputChange}
+                onChange={(e) => setInputValue(e.target.value)}
                 placeholder="Type your message..."
-                disabled={sending}
                 rows="1"
-                onInput={(e) => {
-                  e.target.style.height = 'auto';
-                  e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
-                }}
-                onKeyDown={handleKeyDown}
               />
-              <button type="submit" disabled={!inputValue.trim() || sending}>
-                {sending ? 'Sending...' : 'Send'}
+              <button type="submit" disabled={!inputValue.trim()}>
+                Send
               </button>
             </form>
           </>
